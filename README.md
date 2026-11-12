@@ -39,7 +39,7 @@
 <p><samp>POR AQUI, ATÉ AS CONTRIBUIÇÕES SE MEXEM.</samp></p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=3" />
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=3" />
-  <img src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=3" alt="Animação de uma cobrinha percorrendo o mapa de contribuições do GitHub" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=4" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=4" />
+  <img src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=4" alt="Animação de uma cobrinha percorrendo o mapa de contribuições do GitHub" />
 </picture>
