@@ -7,6 +7,7 @@ fixtures are for local tests only; never use their output for publication.
 """
 
 import argparse
+from bisect import bisect_right
 import datetime as dt
 import json
 import math
@@ -23,6 +24,9 @@ MONTHS = ("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", 
 PITCH = 18
 SEGMENTS = 14
 SEGMENT_SPACING = 0.35
+SPEED = 110.0
+ORBIT_PERIOD = 5.0
+ORIGIN = (78, 194)
 
 
 def fetch_calendar(username):
@@ -92,40 +96,121 @@ def validate_calendar(calendar):
     return days
 
 
-def snake_route(columns):
-    assert columns >= 2 and columns % 2 == 0, "Cycle requires an even column count"
-    route = [(col, 0) for col in range(columns)]
-    for col in range(columns - 1, 0, -1):
-        route.extend((col, row) for row in (range(1, 7) if col % 2 else range(6, 0, -1)))
-    route.extend((0, row) for row in range(6, 0, -1))
-    assert len(route) == columns * 7
-    assert all(0 <= col < columns and 0 <= row < 7 for col, row in route)
-    assert len(set(route)) == len(route), "Route overlaps itself"
-    assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
-               for a, b in zip(route, route[1:] + route[:1])), "Non-adjacent route including closure"
-    return route
+def build_motion(calendar, columns=None):
+    """Pure, pixel-space route and timing; positive real cells are the only food.
+
+    Visits are (column, row, count, arrival_seconds). Positions can be sampled
+    independently with motion_position(). No calendar values are synthesized.
+    """
+    days = validate_calendar(calendar)
+    columns = columns or (len(calendar["weeks"]) + 1) // 2 * 2
+    if columns < len(calendar["weeks"]) or columns < 2:
+        raise ValueError("Motion requires at least two columns and room for all weeks")
+    x, y = ORIGIN
+    bounds = (x - 6.5, y - 6.5, x + (columns - 1) * PITCH + 6.5, y + 6 * PITCH + 6.5)
+    center = (x + (columns - 1) * PITCH / 2, y + 3 * PITCH)
+    radius = min(24.0, (bounds[2] - bounds[0]) / 2 - 6.5,
+                 (bounds[3] - bounds[1]) / 2 - 6.5)
+    points, distances, visits = [center], [0.0], []
+    remaining = [(day[1], day[2], day[3]) for day in days if day[3] > 0]
+    # At most 378 cells: a deterministic nearest-neighbour scan needs no solver.
+    while remaining:
+        px, py = points[-1]
+        food = min(remaining, key=lambda cell: ((x + cell[0] * PITCH - px) ** 2
+                                               + (y + cell[1] * PITCH - py) ** 2,
+                                               cell[0], cell[1]))
+        remaining.remove(food)
+        point = (x + food[0] * PITCH, y + food[1] * PITCH)
+        distance = math.dist(points[-1], point)
+        if distance:
+            points.append(point)
+            distances.append(distances[-1] + distance)
+        visits.append((*food, distances[-1] / SPEED))
+    collection_duration = distances[-1] / SPEED
+    if visits:
+        join = (center[0] + radius, center[1])
+        distance = math.dist(points[-1], join)
+        if distance:
+            points.append(join)
+            distances.append(distances[-1] + distance)
+    join_time = distances[-1] / SPEED
+    # A whole orbit flushes the approach from every segment's history. Very
+    # narrow calendars need two revolutions to accommodate the full tail.
+    laps = max(1, math.ceil((SEGMENTS - 1) * SEGMENT_SPACING * PITCH / (math.tau * radius)))
+    handoff = join_time + laps * ORBIT_PERIOD if visits else 0.0
+    return dict(points=points, distances=distances, visits=visits, center=center,
+                radius=radius, bounds=bounds, collection_duration=collection_duration,
+                join_time=join_time, handoff_time=handoff, orbit_period=ORBIT_PERIOD)
+
+
+def motion_position(motion, seconds, segment=0):
+    """Return continuous (x, y, tangent_degrees), including the initial tail."""
+    cx, cy = motion["center"]
+    radius, join = motion["radius"], motion["distances"][-1]
+    orbit_speed = math.tau * radius / motion["orbit_period"]
+    distance = (seconds * SPEED if seconds <= motion["join_time"] else
+                join + (seconds - motion["join_time"]) * orbit_speed)
+    distance -= segment * SEGMENT_SPACING * PITCH
+    if not motion["visits"] or distance >= join:
+        angle = (distance - join) / radius
+        return cx + radius * math.cos(angle), cy + radius * math.sin(angle), math.degrees(angle) + 90
+    if distance < 0:
+        # The small prehistory circle ends at the centered head at t=0 and is
+        # itself wholly inside the grid. No initial segment is parked offscreen.
+        pre_radius = radius / 2
+        angle = distance / pre_radius
+        return cx - pre_radius + pre_radius * math.cos(angle), cy + pre_radius * math.sin(angle), math.degrees(angle) + 90
+    index = min(bisect_right(motion["distances"], distance) - 1, len(motion["points"]) - 2)
+    a, b = motion["points"][index:index + 2]
+    fraction = (distance - motion["distances"][index]) / math.dist(a, b)
+    return (a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1]),
+            math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])))
+
+
+def segment_frames(motion, segment):
+    """Only path vertices and bounded circle samples, shifted by tail distance."""
+    lag = segment * SEGMENT_SPACING * PITCH
+    join = motion["distances"][-1]
+    orbit_speed = math.tau * motion["radius"] / motion["orbit_period"]
+    end = join + (motion["handoff_time"] - motion["join_time"]) * orbit_speed
+    keys = {0.0, join, end}
+    keys.update(distance + lag for distance in motion["distances"])
+    # Circle chords subtend at most 5.625 degrees (under .03px error at r=24).
+    step = math.tau * motion["radius"] / 64
+    keys.update(join + lag + index * step for index in range(math.ceil((end - join) / step) + 1))
+    step = math.tau * (motion["radius"] / 2) / 64
+    keys.update(lag - index * step for index in range(math.ceil(lag / step) + 1))
+    for distance in sorted(key for key in keys if 0 <= key <= end):
+        seconds = (distance / SPEED if distance <= join else
+                   motion["join_time"] + (distance - join) / orbit_speed)
+        yield seconds, motion_position(motion, seconds, segment)
+
+
+def turn_frames(motion):
+    """Short, shortest-angle turns; tangent eyes throughout the final orbit."""
+    points, distances = motion["points"], motion["distances"]
+    angles = [math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+              for a, b in zip(points, points[1:])] + [90.0]
+    angle = angles[0]
+    yield 0.0, angle
+    for index in range(1, len(points)):
+        seconds = distances[index] / SPEED
+        window = min(.045, (distances[index] - distances[index - 1]) / SPEED / 4)
+        yield seconds - window, angle
+        angle += (angles[index] - angle + 180) % 360 - 180
+        yield seconds, angle
+    yield motion["handoff_time"], angle + 360 * (motion["handoff_time"] - motion["join_time"]) / motion["orbit_period"]
 
 
 def render_svg(calendar, username, dark=False):
     days = validate_calendar(calendar)
     columns = (len(calendar["weeks"]) + 1) // 2 * 2
-    route = snake_route(columns)
-    count = len(route)
+    motion = build_motion(calendar, columns)
     width, height = max(720, columns * PITCH + 124), 448
-    origin_x, origin_y = 78, 194
-    board = (20, 128, width - 40, 230)
-    points = [(origin_x + col * PITCH, origin_y + row * PITCH) for col, row in route]
-    # An enclosing circle covers each rotated head, eye, and body segment.
-    # Convex board bounds also contain every interpolated point on every edge.
-    head_radius = max(6.2, math.hypot(3.4, 2.5) + 1.3)
-    for x, y in points:
-        assert board[0] + 12 <= x - head_radius and x + head_radius <= board[0] + board[2] - 12
-        assert board[1] + 12 <= y - head_radius and y + head_radius <= board[1] + board[3] - 12
-        assert origin_x - 6.5 <= x - head_radius and x + head_radius <= origin_x + (columns - 1) * PITCH + 6.5
-        assert origin_y - 6.5 <= y - head_radius and y + head_radius <= origin_y + 6 * PITCH + 6.5
+    origin_x, origin_y = ORIGIN
     radii = [6.2 - segment * 3 / (SEGMENTS - 1) for segment in range(SEGMENTS)]
     assert all(a + b >= SEGMENT_SPACING * PITCH for a, b in zip(radii, radii[1:]))
-    duration = max(36, count * 0.135)
+    duration = motion["handoff_time"]
     active = sum(day[3] > 0 for day in days)
     streak = longest = 0
     for day in days:
@@ -143,49 +228,44 @@ def render_svg(calendar, username, dark=False):
     title = f"{label} · Cobra de contribuições"
     description = (f"{calendar['totalContributions']} contribuições; {active} dias ativos; "
                    f"maior sequência de {longest} dias. De {days[0][0]} a {days[-1][0]}. "
-                   "A cobra percorre somente células da grade. Movimento reduzido mostra o calendário completo.")
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
+                   "A cobra busca cada dia ativo uma vez e depois orbita o centro da grade. "
+                   "Movimento reduzido mostra o calendário completo.")
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc" data-collection-duration="{motion["collection_duration"]:.9f}" data-handoff-time="{duration:.9f}" data-orbit-period="{motion["orbit_period"]:g}">',
            f'<title id="title">{title}</title><desc id="desc">{escape(description)}</desc>',
-           f'<defs><clipPath id="board-clip"><rect x="20" y="128" width="{width - 40}" height="230" rx="16"/></clipPath></defs>']
+           f'<defs><clipPath id="board-clip"><rect x="20" y="128" width="{width - 40}" height="230" rx="16"/></clipPath>'
+           f'<clipPath id="grid-clip"><rect x="{motion["bounds"][0]}" y="{motion["bounds"][1]}" width="{motion["bounds"][2] - motion["bounds"][0]}" height="121"/></clipPath></defs>']
     css = [f'text{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:{text}}}',
            f'.muted{{fill:{muted}}}.snake{{fill:{snake}}}',
-           f'.progress{{transform:scaleX(0);animation:progress {duration:.3f}s steps(1,end) infinite}}',
-           f'.snake{{animation:move {duration:.3f}s linear infinite}}']
-    angles = []
-    for index, (x, y) in enumerate(points):
-        nx, ny = points[(index + 1) % count]
-        angles.append(math.degrees(math.atan2(ny - y, nx - x)))
-    frames = []
-    for index in range(count + 1):
-        x, y = points[index % count]
-        frames.append(f'{100 * index / count:.6f}%{{transform:translate({x}px,{y}px)}}')
-    css.append(f'@keyframes move{{{"".join(frames)}}}')
-    for segment in range(1, SEGMENTS):
-        delay = -duration + segment * SEGMENT_SPACING * duration / count
-        css.append(f'.s{segment}{{animation-delay:{delay:.9f}s}}')
-    frames = [f'{100 * index / count:.6f}%{{transform:rotate({angles[index % count]:g}deg)}}' for index in range(count + 1)]
-    css.extend((f'@keyframes turn{{{"".join(frames)}}}',
-                f'.head{{animation:turn {duration:.3f}s steps(1,end) infinite}}'))
-    visit = {point: index for index, point in enumerate(route)}
-    contributions_by_cell = {(day[1], day[2]): day[3] for day in days}
-    real_total = sum(contributions_by_cell.values())
+           '.progress{transform:scaleX(0)}',
+           f'@keyframes eat{{to{{fill:{eaten}}}}}',
+           '@keyframes hide{to{visibility:hidden}}@keyframes show{to{visibility:visible}}',
+           '@keyframes orbit{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
+           f'.gathering-layer{{animation:hide .001s steps(1,start) {duration:.9f}s forwards}}',
+           f'.orbit-layer{{visibility:hidden;transform-origin:0 0;animation:show .001s steps(1,start) {duration:.9f}s forwards,orbit {ORBIT_PERIOD:g}s linear {duration:.9f}s infinite}}']
+    if duration:
+        for segment in range(SEGMENTS):
+            frames = [f'{100 * seconds / duration:.6f}%{{transform:translate({round(x, 2):g}px,{round(y, 2):g}px)}}'
+                      for seconds, (x, y, _) in segment_frames(motion, segment)]
+            css.append(f'@keyframes move{segment}{{{"".join(frames)}}}')
+            css.append(f'.gathering-layer .s{segment}{{animation:move{segment} {duration:.9f}s linear forwards}}')
+        frames = [f'{100 * seconds / duration:.6f}%{{transform:rotate({angle:.4f}deg)}}'
+                  for seconds, angle in turn_frames(motion)]
+        css.extend((f'@keyframes turn{{{"".join(frames)}}}',
+                    f'.gathering-layer .head{{animation:turn {duration:.9f}s linear forwards}}'))
+    real_total = sum(day[3] for day in days)
     consumed = 0
     progress_frames = ['0%{transform:scaleX(0)}']
-    for index, cell in enumerate(route):
-        value = contributions_by_cell.get(cell, 0)
-        if value:
-            consumed += value
-            progress_frames.append(f'{100 * index / count:.6f}%{{transform:scaleX({consumed / real_total:.9f})}}')
-    progress_frames.append(f'99.85%{{transform:scaleX({1 if real_total else 0})}}99.9%,100%{{transform:scaleX(0)}}')
+    for col, row, value, arrival in motion["visits"]:
+        consumed += value
+        # Use handoff as the timeline so even a zero-distance first meal is
+        # defined, and the final 100% is retained throughout the orbit.
+        progress_frames.append(f'{100 * arrival / duration:.6f}%{{transform:scaleX({consumed / real_total:.9f})}}')
+        css.append(f'.c{col}_{row}{{animation:eat .001s steps(1,start) {arrival:.9f}s forwards}}')
+    progress_frames.append(f'100%{{transform:scaleX({1 if real_total else 0})}}')
     css.append('@keyframes progress{' + ''.join(progress_frames) + '}')
-    for date, col, row, contributions, level in days:
-        if contributions:
-            percent = 100 * visit[(col, row)] / count
-            # Keep the complete map readable initially; restore before loop closure.
-            css.append(f'@keyframes eat{col}_{row}{{0%{{fill:{palette[level]}}}'
-                       f'{percent:.6f}%{{fill:{eaten}}}99.85%{{fill:{eaten}}}99.9%,100%{{fill:{palette[level]}}}}}')
-            css.append(f'.c{col}_{row}{{animation:eat{col}_{row} {duration:.3f}s steps(1,end) infinite}}')
-    css.append('@media(prefers-reduced-motion:reduce){.snake-layer{display:none}.snake,.head,.cell,.progress{animation:none!important}.progress{transform:scaleX(0)}}')
+    if duration:
+        css.append(f'.progress{{animation:progress {duration:.9f}s steps(1,end) forwards}}')
+    css.append('@media(prefers-reduced-motion:reduce){.snake-layer{display:none}.snake-layer *,.cell,.progress{animation:none!important}.progress{transform:scaleX(0)}}')
     out.append('<style>' + ''.join(css) + '</style>')
     out.extend((f'<rect width="{width}" height="{height}" rx="20" fill="{page}"/>',
                 f'<rect x=".5" y=".5" width="{width - 1}" height="{height - 1}" rx="20" fill="none" stroke="{border}"/>',
@@ -220,20 +300,24 @@ def render_svg(calendar, username, dark=False):
         x, y = origin_x + col * PITCH - 6.5, origin_y + row * PITCH - 6.5
         tip = quoteattr(f"{date.isoformat()}: {contributions} contribuições")
         out.append(f'<rect class="cell c{col}_{row}" x="{x}" y="{y}" width="13" height="13" rx="3" fill="{palette[level]}" aria-label={tip}><title>{escape(f"{date}: {contributions} contribuições")}</title></rect>')
-    out.append('<g class="snake-layer">')
-    for segment in range(SEGMENTS - 1, -1, -1):
-        phase = (-segment * SEGMENT_SPACING) % count
-        index = math.floor(phase)
-        fraction = phase - index
-        a, b = points[index], points[(index + 1) % count]
-        x, y = (a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1]))
-        radius = radii[segment]
-        out.append(f'<g class="snake s{segment}" style="transform:translate({x}px,{y}px)">')
-        if segment == 0:
-            out.append(f'<g class="head"><ellipse rx="6.2" ry="5.8"/><circle cx="3.4" cy="-2.5" r="1.3" fill="{eye}"/><circle cx="3.4" cy="2.5" r="1.3" fill="{eye}"/></g>')
+    out.append('<g class="snake-layer" clip-path="url(#grid-clip)">')
+    cx, cy = motion["center"]
+    for gathering in (True, False):
+        if gathering:
+            out.append('<g class="gathering-layer">')
         else:
-            out.append(f'<circle r="{radius:.2f}" opacity="{1 - segment * 0.055:.3f}"/>')
-        out.append('</g>')
+            out.append(f'<g transform="translate({cx:g} {cy:g})"><g class="orbit-layer">')
+        for segment in range(SEGMENTS - 1, -1, -1):
+            x, y, angle = motion_position(motion, 0 if gathering else duration, segment)
+            if not gathering:
+                x, y, angle = x - cx, y - cy, 90
+            out.append(f'<g class="snake s{segment}" style="transform:translate({x:.2f}px,{y:.2f}px)">')
+            if segment == 0:
+                out.append(f'<g class="head" style="transform:rotate({angle:.4f}deg)"><ellipse rx="6.2" ry="5.8"/><circle cx="3.4" cy="-2.5" r="1.3" fill="{eye}"/><circle cx="3.4" cy="2.5" r="1.3" fill="{eye}"/></g>')
+            else:
+                out.append(f'<circle r="{radii[segment]:.2f}" opacity="{1 - segment * 0.055:.3f}"/>')
+            out.append('</g>')
+        out.append('</g>' if gathering else '</g></g>')
     out.append('</g></g>')
     out.append(f'<text x="24" y="390" class="muted" font-size="11">{days[0][0].isoformat()} — {days[-1][0].isoformat()}</text>')
     legend_x = width - 174
@@ -243,7 +327,7 @@ def render_svg(calendar, username, dark=False):
     out.append(f'<text x="{legend_x + 94}" y="390" class="muted" font-size="10">Mais</text>')
     out.append(f'<rect x="24" y="412" width="{width - 48}" height="4" rx="2" fill="{palette[0]}"/>')
     out.append(f'<g transform="translate(24 412)"><rect class="progress" width="{width - 48}" height="4" rx="2" fill="{snake}"/></g>')
-    out.append(f'<text x="24" y="436" class="muted" font-size="9">CONTRIBUIÇÕES DO GITHUB · CICLO FECHADO</text><text x="{width - 24}" y="436" text-anchor="end" class="muted" font-size="9">{duration:.0f}s / ciclo</text></svg>')
+    out.append(f'<text x="24" y="436" class="muted" font-size="9">CONTRIBUIÇÕES DO GITHUB · COLETA ÚNICA</text><text x="{width - 24}" y="436" text-anchor="end" class="muted" font-size="9">{motion["collection_duration"]:.0f}s / coleta · {ORBIT_PERIOD:g}s / órbita</text></svg>')
     return '\n'.join(out) + '\n'
 
 
