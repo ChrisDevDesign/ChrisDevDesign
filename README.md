@@ -20,8 +20,10 @@
 <p><samp>DESIGN</samp></p>
 <p>
   <img src="https://skillicons.dev/icons?i=figma" height="40" alt="Figma" />
+  <img src="assets/icons/wcag.svg" width="40" height="40" alt="WCAG — diretrizes de acessibilidade" />
+  <img src="assets/icons/ux-ui.svg" width="40" height="40" alt="UX/UI — experiência e interface" />
 </p>
-<p>Pesquisa UX · Design systems · Acessibilidade</p>
+<p>Pesquisa UX · Design systems</p>
 
 <p><samp>DESENVOLVIMENTO</samp></p>
 <p>

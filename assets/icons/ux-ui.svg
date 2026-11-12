@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40" role="img" aria-labelledby="title desc">
+  <title id="title">UX/UI</title>
+  <desc id="desc">Janela com wireframe e cursor, representando experiência do usuário e design de interfaces.</desc>
+  <rect width="40" height="40" rx="9" fill="#242938"/>
+  <g fill="none" stroke="#55D9F5" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="7" y="5" width="26" height="19" rx="2.5"/>
+    <path d="M7 10h26M11 8h.1M14 8h.1"/>
+    <rect x="11" y="14" width="6" height="6" rx="1"/>
+    <path d="M21 14h7m-7 4h4"/>
+    <path d="m24 19 1.5 9 2.5-3 3.5-.5Z" fill="#242938"/>
+  </g>
+  <text x="20" y="35" text-anchor="middle" fill="#FFFFFF" font-family="Arial, sans-serif" font-weight="700" font-size="8">UX/UI</text>
+</svg>
