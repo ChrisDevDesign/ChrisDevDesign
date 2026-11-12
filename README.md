@@ -17,6 +17,18 @@ Projeto produtos digitais para quem a interface costuma deixar de fora — e lev
 
 </div>
 
+## Minha cobrinha de contribuições
+
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg" />
+  <img alt="Cobrinha animada percorrendo o mapa de contribuições e comendo os quadradinhos" src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg" />
+</picture>
+
+</div>
+
 ---
 
 ## Do papel ao pixel
