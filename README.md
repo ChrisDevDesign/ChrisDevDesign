@@ -1,72 +1,45 @@
 <div align="center">
 
-<img src="https://readme-typing-svg.demolab.com?font=DM+Mono&weight=500&size=16&pause=1100&color=04724D&center=true&vCenter=true&width=600&height=32&lines=Product+Designer+que+implementa;Do+problema+ao+produto+em+c%C3%B3digo;Design+com+inten%C3%A7%C3%A3o.+Implementa%C3%A7%C3%A3o+com+crit%C3%A9rio." alt="Product Designer que implementa" />
+<samp>RECIFE, BRASIL · DESIGN & CÓDIGO</samp>
+<h1>Oi, eu sou o Christian.</h1>
+<h3>Product Designer que implementa.</h3>
+<p>Christian Barnard · Aberto a oportunidades júnior em Product Design.</p>
 
-# Christian Barnard
-
-### Product Designer · Recife, Brasil
-
-Projeto produtos digitais para quem a interface costuma deixar de fora — e levo a decisão até o código, onde ela para de ser hipótese.
-
-[Portfólio](https://www.christianbj.com.br) · [LinkedIn](https://www.linkedin.com/in/christian-barnard) · [E-mail](mailto:christianbj2@gmail.com)
-
-![Product Design](https://img.shields.io/badge/Product_Design-171C17?style=flat-square&logo=figma&logoColor=8DB38B)
-![React](https://img.shields.io/badge/React-171C17?style=flat-square&logo=react&logoColor=8DB38B)
-![TypeScript](https://img.shields.io/badge/TypeScript-171C17?style=flat-square&logo=typescript&logoColor=8DB38B)
-![Vite](https://img.shields.io/badge/Vite-171C17?style=flat-square&logo=vite&logoColor=8DB38B)
+<p>
+  <a href="https://www.christianbj.com.br"><img src="https://img.shields.io/badge/Portf%C3%B3lio-254B3A?style=for-the-badge&amp;logoColor=white" alt="Ver meu portfólio" /></a>
+  <a href="mailto:christianbj2@gmail.com"><img src="https://img.shields.io/badge/E--mail-EAE4D8?style=for-the-badge&amp;logo=gmail&amp;logoColor=24292F" alt="Enviar e-mail para christianbj2@gmail.com" /></a>
+  <a href="https://www.linkedin.com/in/christian-barnard"><img src="https://img.shields.io/badge/LinkedIn-24292F?style=for-the-badge&amp;logoColor=white" alt="Meu perfil no LinkedIn" /></a>
+</p>
 
 </div>
 
-## Contribuições em movimento
+---
 
-<div align="center">
+<h3>Entre o Figma e o código</h3>
+
+<p><samp>DESIGN</samp></p>
+<p>
+  <img src="https://skillicons.dev/icons?i=figma" height="40" alt="Figma" />
+</p>
+<p>Pesquisa UX · Design systems · Acessibilidade</p>
+
+<p><samp>DESENVOLVIMENTO</samp></p>
+<p>
+  <img src="https://skillicons.dev/icons?i=react,ts,vite,html,css,git" height="40" alt="React, TypeScript, Vite, HTML, CSS e Git" />
+</p>
+
+<h3>Projetos para explorar</h3>
+
+- **[Void ↗](https://www.christianbj.com.br/void)** — App desktop de comunicação para equipes, com canais e voz, em beta.
+- **[Covil dos Répteis ↗](https://www.christianbj.com.br/covil)** — Plataforma educativa para um santuário, com enciclopédia, perfis dos animais e gestão de conteúdo.
+- **[Modale ↗](https://www.christianbj.com.br/modale)** — Pesquisa sobre transporte público no Recife traduzida em um protótipo com foco no passe.
+
+---
+
+<p><samp>POR AQUI, ATÉ AS CONTRIBUIÇÕES SE MEXEM.</samp></p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=2" />
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=2" />
-  <img width="1000" alt="Mapa anual de contribuições com meses, totais e cobrinha contida no painel" src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=2" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=3" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=3" />
+  <img src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=3" alt="Animação de uma cobrinha percorrendo o mapa de contribuições do GitHub" />
 </picture>
-
-</div>
-
----
-
-## Do papel ao pixel
-
-Sou Product Designer e trabalho da compreensão do problema à interface implementada. Pesquisa, arquitetura e protótipos ajudam a transformar suposições em decisões que podem ser avaliadas na prática.
-
-Tenho interesse em **Product Design, UX/UI e acessibilidade digital**. Front-end é parte do processo: ajuda a conferir se a experiência funciona fora do Figma também.
-
-## Projetos em destaque
-
-| Projeto | Sobre |
-| --- | --- |
-| [Void](https://www.christianbj.com.br/void) | App desktop de comunicação para equipes, com canais, conversas e voz. Em beta. |
-| [Covil dos Répteis](https://www.christianbj.com.br/covil) | Plataforma educativa para um santuário, com enciclopédia e perfis dos animais. |
-| [Modale](https://www.christianbj.com.br/modale) | Estudo de mobilidade urbana no Recife, da pesquisa ao protótipo. |
-
-## Meu processo
-
-`Entender` → `Duvidar` → `Estruturar` → `Desenhar` → `Avaliar` → `Implementar`
-
-Acessibilidade acompanha esse processo: meço contraste, considero diferentes formas de percepção e registro os limites do que foi avaliado.
-
-## Ferramentas e práticas
-
-**Design**  
-Product Design · UX/UI · UX Research · Arquitetura da informação · Prototipagem · Design Systems · Acessibilidade
-
-**Desenvolvimento**  
-React · TypeScript · Vite · HTML · CSS
-
----
-
-<div align="center">
-
-**Designer primeiro. Código como parte do processo.**
-
-Aberto a oportunidades júnior em Product Design.
-
-[Vamos conversar ↗](mailto:christianbj2@gmail.com)
-
-</div>
