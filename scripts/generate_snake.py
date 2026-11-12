@@ -1,16 +1,15 @@
 """Generate contained, animated GitHub contribution SVGs using only the stdlib.
 
-Live: GITHUB_TOKEN=... GH_USERNAME=ChrisDevDesign python generate_snake.py
-Offline: python generate_snake.py --calendar-json calendar.json --output-dir dist
+Live: GITHUB_TOKEN=... GH_USERNAME=ChrisDevDesign python scripts/generate_snake.py
+Offline: python scripts/generate_snake.py --calendar-json calendar.json --output-dir dist
 Offline input must be a direct GitHub contributionsCalendar object. Synthetic
 fixtures are for local tests only; never use their output for publication.
 """
 
 import argparse
-from bisect import bisect_right
+from collections import deque
 import datetime as dt
 import json
-import math
 import os
 from pathlib import Path
 import sys
@@ -22,10 +21,7 @@ from xml.sax.saxutils import escape, quoteattr
 LEVELS = ("NONE", "FIRST_QUARTILE", "SECOND_QUARTILE", "THIRD_QUARTILE", "FOURTH_QUARTILE")
 MONTHS = ("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
 PITCH = 18
-SEGMENTS = 14
-SEGMENT_SPACING = 0.35
-SPEED = 110.0
-ORBIT_PERIOD = 5.0
+STEP_SECONDS = 0.09
 ORIGIN = (78, 194)
 
 
@@ -96,121 +92,297 @@ def validate_calendar(calendar):
     return days
 
 
-def build_motion(calendar, columns=None):
-    """Pure, pixel-space route and timing; positive real cells are the only food.
 
-    Visits are (column, row, count, arrival_seconds). Positions can be sampled
-    independently with motion_position(). No calendar values are synthesized.
+def _neighbors(cell, columns):
+    x, y = cell
+    # Stable tie order: right first, then down, left, up.
+    return tuple((a, b) for a, b in ((x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1))
+                 if 0 <= a < columns and 0 <= b < 7)
+
+
+def _hamiltonian(columns):
+    """Even-width seven-row cycle, beginning at (0,3), heading right."""
+    cells = [(x, 3) for x in range(columns - 1)]
+    cells += [(x, y) for x in range(columns - 2, -1, -1)
+              for y in ((4, 5) if x % 2 == 0 else (5, 4))]
+    cells += [(x, 6) for x in range(columns)]
+    cells += [(columns - 1, y) for y in (5, 4, 3)]
+    cells += [(x, y) for x in range(columns - 1, -1, -1)
+              for y in ((2, 1, 0) if x % 2 else (0, 1, 2))]
+    assert len(set(cells)) == columns * 7
+    assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
+               for a, b in zip(cells, cells[1:] + cells[:1]))
+    return tuple(cells)
+
+
+def _advance(body, cell, growing=False):
+    """Legal one-cell Snake tick. The tail may vacate only when not growing."""
+    head = body[0]
+    if abs(head[0] - cell[0]) + abs(head[1] - cell[1]) != 1:
+        return None
+    if len(body) > 1 and cell == body[1]:
+        return None
+    if cell in (body if growing else body[:-1]):
+        return None
+    return (cell,) + (body if growing else body[:-1])
+
+
+def _rectangle(columns, length):
+    # Prefer the centered five-row loop, reserving two cells beyond the body.
+    # With the real 61-cell snake this is x=12..41, y=1..5 (66 cells).
+    for height in (5, 7, 3):
+        width = max(min(8, columns), (length + 3) // 2 - height + 2)
+        width += width % 2
+        if not 2 <= width <= columns:
+            continue
+        left, top = (columns - width) // 2, (7 - height) // 2
+        right, bottom = left + width - 1, top + height - 1
+        cycle = ([(x, top) for x in range(left, right + 1)]
+                 + [(right, y) for y in range(top + 1, bottom + 1)]
+                 + [(x, bottom) for x in range(right - 1, left - 1, -1)]
+                 + [(left, y) for y in range(bottom - 1, top, -1)])
+        if len(cycle) >= length + 2:
+            yield tuple(cycle)
+
+
+def _canonical(body, cycle, lookup):
+    phase = lookup[body[0]]
+    return all(cell == cycle[(phase - i) % len(cycle)] for i, cell in enumerate(body))
+
+
+def _join_loop(body, cycle, columns):
+    """Find a short approach via an outside predecessor; prove two full laps.
+
+    BFS avoids the entire current body. We then simulate the moving tail on
+    each candidate approach and loop, accepting only a collision-free handoff.
+    """
+    loop_cells = set(cycle)
+    blocked = set(body[1:])
+    parents = {body[0]: None}
+    queue = deque([body[0]])
+    while queue:
+        source = queue.popleft()
+        for cell in _neighbors(source, columns):
+            if cell not in parents and cell not in blocked:
+                parents[cell] = source
+                queue.append(cell)
+    paths = {}
+    def path_to(cell):
+        if cell not in paths:
+            route, at = [], cell
+            while parents[at] is not None:
+                route.append(at)
+                at = parents[at]
+            paths[cell] = tuple(reversed(route))
+        return paths[cell]
+    candidates = []
+    for index, entry in enumerate(cycle):
+        for outside in _neighbors(entry, columns):
+            if outside not in loop_cells and outside in parents:
+                path = path_to(outside) + (entry,)
+                candidates.append((len(path), index, path))
+        if entry == body[0]:
+            candidates.append((0, index, ()))
+    for _, index, path in sorted(candidates):
+        for direction in (1, -1):
+            oriented = cycle if direction == 1 else tuple(reversed(cycle))
+            lookup = {cell: i for i, cell in enumerate(oriented)}
+            current, approach, valid = body, [], True
+            for cell in path:
+                current = _advance(current, cell)
+                if current is None:
+                    valid = False
+                    break
+                approach.append(current)
+            if not valid:
+                continue
+            # Explicit validation includes the entry, all body cells, turns,
+            # and the wraparound, not just reachability of the head.
+            handoff = list(approach) if _canonical(current, oriented, lookup) else None
+            for tick in range(2 * len(oriented)):
+                cell = oriented[(lookup[current[0]] + 1) % len(oriented)]
+                current = _advance(current, cell)
+                if current is None:
+                    valid = False
+                    break
+                if handoff is None:
+                    approach.append(current)
+                    if _canonical(current, oriented, lookup):
+                        handoff = list(approach)
+            if valid and handoff is not None:
+                return oriented, handoff
+    return None
+
+
+def build_game(calendar, columns=None):
+    """Pure deterministic plan, with integer grid coordinates throughout.
+
+    frames[step]: head-first tuple of body cells, starting with ((0,3),).
+    events: (step, column, row, contribution_count), one per positive day.
+    idle_frames: one whole repeating period PLUS its duplicate closure frame.
+    frames[handoff_step] == idle_frames[0] == idle_frames[-1].
+    idle_cycle: ordered head cells, rotated to the handoff phase.
+    collection_step, handoff_step, step_seconds: shared rendering clock.
+
+    At least four columns provide a cycle whose first move is right from
+    (0,3); one/two-week inputs get explicit empty padding, never fake food.
+    A food under the initial head is left intact until the head returns. A
+    fully populated even-width fixture needs an extra pair of padding columns
+    to hold 1 + active_days cells; growth is never capped or discarded.
     """
     days = validate_calendar(calendar)
-    columns = columns or (len(calendar["weeks"]) + 1) // 2 * 2
-    if columns < len(calendar["weeks"]) or columns < 2:
-        raise ValueError("Motion requires at least two columns and room for all weeks")
-    x, y = ORIGIN
-    bounds = (x - 6.5, y - 6.5, x + (columns - 1) * PITCH + 6.5, y + 6 * PITCH + 6.5)
-    center = (x + (columns - 1) * PITCH / 2, y + 3 * PITCH)
-    radius = min(24.0, (bounds[2] - bounds[0]) / 2 - 6.5,
-                 (bounds[3] - bounds[1]) / 2 - 6.5)
-    points, distances, visits = [center], [0.0], []
-    remaining = [(day[1], day[2], day[3]) for day in days if day[3] > 0]
-    # At most 378 cells: a deterministic nearest-neighbour scan needs no solver.
-    while remaining:
-        px, py = points[-1]
-        food = min(remaining, key=lambda cell: ((x + cell[0] * PITCH - px) ** 2
-                                               + (y + cell[1] * PITCH - py) ** 2,
-                                               cell[0], cell[1]))
-        remaining.remove(food)
-        point = (x + food[0] * PITCH, y + food[1] * PITCH)
-        distance = math.dist(points[-1], point)
-        if distance:
-            points.append(point)
-            distances.append(distances[-1] + distance)
-        visits.append((*food, distances[-1] / SPEED))
-    collection_duration = distances[-1] / SPEED
-    if visits:
-        join = (center[0] + radius, center[1])
-        distance = math.dist(points[-1], join)
-        if distance:
-            points.append(join)
-            distances.append(distances[-1] + distance)
-    join_time = distances[-1] / SPEED
-    # A whole orbit flushes the approach from every segment's history. Very
-    # narrow calendars need two revolutions to accommodate the full tail.
-    laps = max(1, math.ceil((SEGMENTS - 1) * SEGMENT_SPACING * PITCH / (math.tau * radius)))
-    handoff = join_time + laps * ORBIT_PERIOD if visits else 0.0
-    return dict(points=points, distances=distances, visits=visits, center=center,
-                radius=radius, bounds=bounds, collection_duration=collection_duration,
-                join_time=join_time, handoff_time=handoff, orbit_period=ORBIT_PERIOD)
+    food = {(col, row): count for _, col, row, count, _ in days if count > 0}
+    if columns is not None and (type(columns) is not int or columns < len(calendar['weeks'])
+                                or columns < 2 or columns % 2):
+        raise ValueError('Game columns must be even, >= 2, and fit every calendar week')
+    columns = max(4, columns or (len(calendar['weeks']) + 1) // 2 * 2)
+    if len(food) + 1 > columns * 7:
+        columns += 2
+    cycle = _hamiltonian(columns)
+    lookup, size = {cell: i for i, cell in enumerate(cycle)}, len(cycle)
+    frames, events = [((0, 3),)], []
+    def tick(cell):
+        count = food.get(cell, 0)
+        body = _advance(frames[-1], cell, bool(count))
+        assert body is not None, 'Planner produced an illegal move'
+        assert 0 <= cell[0] < columns and 0 <= cell[1] < 7
+        frames.append(body)
+        if count:
+            events.append((len(frames) - 1, *cell, food.pop(cell)))
+    # Always visibly begin by heading right, even with an empty calendar.
+    tick((1, 3))
+    while food:
+        body = frames[-1]
+        head = lookup[body[0]]
+        # Body remains ordered around the cycle. Never pass the tail or the
+        # next food in that order. The ordinary cycle successor always works.
+        free_arc = (lookup[body[-1]] - head) % size if len(body) > 1 else size
+        food_arc = min((lookup[cell] - head) % size or size for cell in food)
+        choices = []
+        for cell in _neighbors(body[0], columns):
+            advance = (lookup[cell] - head) % size
+            growing = cell in food
+            # Leave enough cycle arc for ALL outstanding growth. In
+            # particular a positive spawn square cannot trap its own tail.
+            if (0 < advance <= min(food_arc, free_arc - len(food)) and
+                    (advance < free_arc or (advance == free_arc and not growing)) and
+                    _advance(body, cell, growing) is not None):
+                choices.append((advance, cell))
+        assert choices, 'Hamiltonian safety invariant was lost'
+        tick(max(choices)[1])
+        assert len(frames) <= (len(days) + 2) * size + 2, 'Collection failed to progress'
+    collection_step = events[-1][0] if events else 0
+    idle_kind, chosen = 'hamiltonian', None
+    rectangles = tuple(_rectangle(columns, len(frames[-1])))
+    # Small bounded retries preserve the cycle-order invariant. Usually the
+    # first BFS succeeds; nearly full boards fall back to their large cycle.
+    for retry in range(25 if rectangles else 1):
+        for rectangle in rectangles:
+            chosen = _join_loop(frames[-1], rectangle, columns)
+            if chosen:
+                idle_kind = 'rectangle'
+                break
+        if chosen:
+            break
+        if rectangles and retry < 24:
+            tick(cycle[(lookup[frames[-1][0]] + 1) % size])
+    if chosen:
+        idle_cycle, joining = chosen
+        frames.extend(joining)
+    else:
+        idle_cycle = cycle
+        # Flush shortcuts into contiguous cycle cells, retaining the full body.
+        while not _canonical(frames[-1], cycle, lookup):
+            tick(cycle[(lookup[frames[-1][0]] + 1) % size])
+    phase = idle_cycle.index(frames[-1][0])
+    idle_cycle = idle_cycle[phase:] + idle_cycle[:phase]
+    length, period = len(frames[-1]), len(idle_cycle)
+    idle_frames = tuple(tuple(idle_cycle[(step - segment) % period]
+                              for segment in range(length))
+                        for step in range(period + 1))
+    assert idle_frames[0] == frames[-1] == idle_frames[-1]
+    assert length == 1 + len(events)
+    return dict(frames=tuple(frames), events=tuple(events), idle_frames=idle_frames,
+                idle_cycle=idle_cycle, handoff_step=len(frames) - 1,
+                collection_step=collection_step, step_seconds=STEP_SECONDS,
+                columns=columns, rows=7, idle_kind=idle_kind,
+                final_length=length, total_consumed=sum(event[3] for event in events))
 
 
-def motion_position(motion, seconds, segment=0):
-    """Return continuous (x, y, tangent_degrees), including the initial tail."""
-    cx, cy = motion["center"]
-    radius, join = motion["radius"], motion["distances"][-1]
-    orbit_speed = math.tau * radius / motion["orbit_period"]
-    distance = (seconds * SPEED if seconds <= motion["join_time"] else
-                join + (seconds - motion["join_time"]) * orbit_speed)
-    distance -= segment * SEGMENT_SPACING * PITCH
-    if not motion["visits"] or distance >= join:
-        angle = (distance - join) / radius
-        return cx + radius * math.cos(angle), cy + radius * math.sin(angle), math.degrees(angle) + 90
-    if distance < 0:
-        # The small prehistory circle ends at the centered head at t=0 and is
-        # itself wholly inside the grid. No initial segment is parked offscreen.
-        pre_radius = radius / 2
-        angle = distance / pre_radius
-        return cx - pre_radius + pre_radius * math.cos(angle), cy + pre_radius * math.sin(angle), math.degrees(angle) + 90
-    index = min(bisect_right(motion["distances"], distance) - 1, len(motion["points"]) - 2)
-    a, b = motion["points"][index:index + 2]
-    fraction = (distance - motion["distances"][index]) / math.dist(a, b)
-    return (a[0] + fraction * (b[0] - a[0]), a[1] + fraction * (b[1] - a[1]),
-            math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])))
+def _clock(step):
+    return f'{step * STEP_SECONDS:.9f}'.rstrip('0').rstrip('.') or '0'
 
 
-def segment_frames(motion, segment):
-    """Only path vertices and bounded circle samples, shifted by tail distance."""
-    lag = segment * SEGMENT_SPACING * PITCH
-    join = motion["distances"][-1]
-    orbit_speed = math.tau * motion["radius"] / motion["orbit_period"]
-    end = join + (motion["handoff_time"] - motion["join_time"]) * orbit_speed
-    keys = {0.0, join, end}
-    keys.update(distance + lag for distance in motion["distances"])
-    # Circle chords subtend at most 5.625 degrees (under .03px error at r=24).
-    step = math.tau * motion["radius"] / 64
-    keys.update(join + lag + index * step for index in range(math.ceil((end - join) / step) + 1))
-    step = math.tau * (motion["radius"] / 2) / 64
-    keys.update(lag - index * step for index in range(math.ceil(lag / step) + 1))
-    for distance in sorted(key for key in keys if 0 <= key <= end):
-        seconds = (distance / SPEED if distance <= join else
-                   motion["join_time"] + (distance - join) / orbit_speed)
-        yield seconds, motion_position(motion, seconds, segment)
+def _keys(count):
+    """Explicit normalized times; final value is a duplicate closure frame."""
+    return ';'.join('0' if i == 0 else '1' if i == count - 1 else
+                    f'{i / (count - 1):.10f}'.rstrip('0') for i in range(count))
 
 
-def turn_frames(motion):
-    """Short, shortest-angle turns; tangent eyes throughout the final orbit."""
-    points, distances = motion["points"], motion["distances"]
-    angles = [math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
-              for a, b in zip(points, points[1:])] + [90.0]
-    angle = angles[0]
-    yield 0.0, angle
-    for index in range(1, len(points)):
-        seconds = distances[index] / SPEED
-        window = min(.045, (distances[index] - distances[index - 1]) / SPEED / 4)
-        yield seconds - window, angle
-        angle += (angles[index] - angle + 180) % 360 - 180
-        yield seconds, angle
-    yield motion["handoff_time"], angle + 360 * (motion["handoff_time"] - motion["join_time"]) / motion["orbit_period"]
+def _angle(a, b):
+    return {(1, 0): 0, (0, 1): 90, (-1, 0): 180, (0, -1): 270}[(b[0] - a[0], b[1] - a[1])]
+
+
+def _snake_svg(game, eye):
+    frames, idle = game['frames'], game['idle_frames']
+    end, period = game['handoff_step'], len(idle) - 1
+    start_time, duration = _clock(end), _clock(period)
+    # Collection occupies steps [0,end); idle takes over at EXACTLY step end.
+    # The final finite value is duplicated to make every discrete tick uniform.
+    finite = frames + (frames[-1],)
+    out = ['<g class="snake-layer" clip-path="url(#grid-clip)">']
+    for gathering, timeline in ((True, finite), (False, idle)):
+        out.append('<g class="game-layer gathering-layer">' if gathering else
+                   '<g class="idle-layer orbit-layer" display="none">')
+        out.append(f'<set attributeName="display" to="{"none" if gathering else "inline"}" begin="{start_time}s" fill="freeze"/>')
+        begin = '0' if gathering else start_time
+        dur = _clock(end + 1) if gathering else duration
+        keys = _keys(len(timeline))
+        repeat = 'fill="freeze"' if gathering else 'repeatCount="indefinite"'
+        headings = []
+        for i, body in enumerate(timeline):
+            if gathering:
+                next_head = frames[min(i + 1, end)][0] if i < end else idle[1][0]
+            else:
+                next_head = idle[(i + 1) % period][0]
+            headings.append(str(_angle(body[0], next_head)))
+        # The finite duplicate must also duplicate the final head direction.
+        if gathering:
+            headings[-1] = headings[-2]
+        births = [0] + [event[0] for event in game['events']]
+        for segment in range(game['final_length'] - 1, -1, -1):
+            positions = []
+            for body in timeline:
+                # Hidden unborn segments are parked at the initial head, never
+                # exposed as prehistory. At birth the old tail is retained.
+                x, y = body[segment] if segment < len(body) else (0, 3)
+                positions.append(f'{ORIGIN[0] + x * PITCH} {ORIGIN[1] + y * PITCH}')
+            visibility = ' visibility="hidden"' if gathering and segment else ''
+            out.append(f'<g class="snake s{segment}" data-segment="{segment}" transform="translate({positions[0]})"{visibility}>')
+            out.append(f'<animateTransform attributeName="transform" type="translate" values="{";".join(positions)}" keyTimes="{keys}" calcMode="discrete" begin="{begin}s" dur="{dur}s" {repeat}/>')
+            if gathering and segment:
+                out.append(f'<set attributeName="visibility" to="visible" begin="{_clock(births[segment])}s" fill="freeze"/>')
+            if segment == 0:
+                out.append(f'<g class="head" transform="rotate({headings[0]})"><animateTransform attributeName="transform" type="rotate" values="{";".join(headings)}" keyTimes="{keys}" calcMode="discrete" begin="{begin}s" dur="{dur}s" {repeat}/><circle r="6.2"/><circle cx="3.4" cy="-2.5" r="1.3" fill="{eye}"/><circle cx="3.4" cy="2.5" r="1.3" fill="{eye}"/></g>')
+            else:
+                out.append('<rect x="-6.2" y="-6.2" width="12.4" height="12.4" rx="4" opacity=".92"/>')
+            out.append('</g>')
+        out.append('</g>')
+    out.append('</g>')
+    return ''.join(out)
 
 
 def render_svg(calendar, username, dark=False):
     days = validate_calendar(calendar)
-    columns = (len(calendar["weeks"]) + 1) // 2 * 2
-    motion = build_motion(calendar, columns)
+    game = build_game(calendar)
+    columns = game['columns']
     width, height = max(720, columns * PITCH + 124), 448
     origin_x, origin_y = ORIGIN
-    radii = [6.2 - segment * 3 / (SEGMENTS - 1) for segment in range(SEGMENTS)]
-    assert all(a + b >= SEGMENT_SPACING * PITCH for a, b in zip(radii, radii[1:]))
-    duration = motion["handoff_time"]
+    duration = game['handoff_step'] * STEP_SECONDS
+    collection_duration = game['collection_step'] * STEP_SECONDS
+    idle_period = len(game['idle_cycle']) * STEP_SECONDS
+    bounds = (origin_x - 6.5, origin_y - 6.5,
+              origin_x + (columns - 1) * PITCH + 6.5, origin_y + 6 * PITCH + 6.5)
     active = sum(day[3] > 0 for day in days)
     streak = longest = 0
     for day in days:
@@ -228,44 +400,15 @@ def render_svg(calendar, username, dark=False):
     title = f"{label} · Cobra de contribuições"
     description = (f"{calendar['totalContributions']} contribuições; {active} dias ativos; "
                    f"maior sequência de {longest} dias. De {days[0][0]} a {days[-1][0]}. "
-                   "A cobra busca cada dia ativo uma vez e depois orbita o centro da grade. "
+                   "A cobra busca cada dia ativo uma vez e cresce um segmento por dia e segue um circuito ortogonal sem reiniciar. "
                    "Movimento reduzido mostra o calendário completo.")
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc" data-collection-duration="{motion["collection_duration"]:.9f}" data-handoff-time="{duration:.9f}" data-orbit-period="{motion["orbit_period"]:g}">',
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc" data-step-seconds="{STEP_SECONDS:g}" data-handoff-step="{game["handoff_step"]}" data-collection-step="{game["collection_step"]}" data-columns="{columns}" data-final-length="{game["final_length"]}" data-idle-kind="{game["idle_kind"]}" data-collection-duration="{collection_duration:.9f}" data-handoff-time="{duration:.9f}" data-idle-period="{idle_period:g}" data-orbit-period="{idle_period:g}">',
            f'<title id="title">{title}</title><desc id="desc">{escape(description)}</desc>',
            f'<defs><clipPath id="board-clip"><rect x="20" y="128" width="{width - 40}" height="230" rx="16"/></clipPath>'
-           f'<clipPath id="grid-clip"><rect x="{motion["bounds"][0]}" y="{motion["bounds"][1]}" width="{motion["bounds"][2] - motion["bounds"][0]}" height="121"/></clipPath></defs>']
+           f'<clipPath id="grid-clip"><rect x="{bounds[0]}" y="{bounds[1]}" width="{bounds[2] - bounds[0]}" height="121"/></clipPath></defs>']
     css = [f'text{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:{text}}}',
            f'.muted{{fill:{muted}}}.snake{{fill:{snake}}}',
-           '.progress{transform:scaleX(0)}',
-           f'@keyframes eat{{to{{fill:{eaten}}}}}',
-           '@keyframes hide{to{visibility:hidden}}@keyframes show{to{visibility:visible}}',
-           '@keyframes orbit{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
-           f'.gathering-layer{{animation:hide .001s steps(1,start) {duration:.9f}s forwards}}',
-           f'.orbit-layer{{visibility:hidden;transform-origin:0 0;animation:show .001s steps(1,start) {duration:.9f}s forwards,orbit {ORBIT_PERIOD:g}s linear {duration:.9f}s infinite}}']
-    if duration:
-        for segment in range(SEGMENTS):
-            frames = [f'{100 * seconds / duration:.6f}%{{transform:translate({round(x, 2):g}px,{round(y, 2):g}px)}}'
-                      for seconds, (x, y, _) in segment_frames(motion, segment)]
-            css.append(f'@keyframes move{segment}{{{"".join(frames)}}}')
-            css.append(f'.gathering-layer .s{segment}{{animation:move{segment} {duration:.9f}s linear forwards}}')
-        frames = [f'{100 * seconds / duration:.6f}%{{transform:rotate({angle:.4f}deg)}}'
-                  for seconds, angle in turn_frames(motion)]
-        css.extend((f'@keyframes turn{{{"".join(frames)}}}',
-                    f'.gathering-layer .head{{animation:turn {duration:.9f}s linear forwards}}'))
-    real_total = sum(day[3] for day in days)
-    consumed = 0
-    progress_frames = ['0%{transform:scaleX(0)}']
-    for col, row, value, arrival in motion["visits"]:
-        consumed += value
-        # Use handoff as the timeline so even a zero-distance first meal is
-        # defined, and the final 100% is retained throughout the orbit.
-        progress_frames.append(f'{100 * arrival / duration:.6f}%{{transform:scaleX({consumed / real_total:.9f})}}')
-        css.append(f'.c{col}_{row}{{animation:eat .001s steps(1,start) {arrival:.9f}s forwards}}')
-    progress_frames.append(f'100%{{transform:scaleX({1 if real_total else 0})}}')
-    css.append('@keyframes progress{' + ''.join(progress_frames) + '}')
-    if duration:
-        css.append(f'.progress{{animation:progress {duration:.9f}s steps(1,end) forwards}}')
-    css.append('@media(prefers-reduced-motion:reduce){.snake-layer{display:none}.snake-layer *,.cell,.progress{animation:none!important}.progress{transform:scaleX(0)}}')
+           '@media(prefers-reduced-motion:reduce){.snake-layer,.consumption,.progress{display:none!important}}']
     out.append('<style>' + ''.join(css) + '</style>')
     out.extend((f'<rect width="{width}" height="{height}" rx="20" fill="{page}"/>',
                 f'<rect x=".5" y=".5" width="{width - 1}" height="{height - 1}" rx="20" fill="none" stroke="{border}"/>',
@@ -300,25 +443,14 @@ def render_svg(calendar, username, dark=False):
         x, y = origin_x + col * PITCH - 6.5, origin_y + row * PITCH - 6.5
         tip = quoteattr(f"{date.isoformat()}: {contributions} contribuições")
         out.append(f'<rect class="cell c{col}_{row}" x="{x}" y="{y}" width="13" height="13" rx="3" fill="{palette[level]}" aria-label={tip}><title>{escape(f"{date}: {contributions} contribuições")}</title></rect>')
-    out.append('<g class="snake-layer" clip-path="url(#grid-clip)">')
-    cx, cy = motion["center"]
-    for gathering in (True, False):
-        if gathering:
-            out.append('<g class="gathering-layer">')
-        else:
-            out.append(f'<g transform="translate({cx:g} {cy:g})"><g class="orbit-layer">')
-        for segment in range(SEGMENTS - 1, -1, -1):
-            x, y, angle = motion_position(motion, 0 if gathering else duration, segment)
-            if not gathering:
-                x, y, angle = x - cx, y - cy, 90
-            out.append(f'<g class="snake s{segment}" style="transform:translate({x:.2f}px,{y:.2f}px)">')
-            if segment == 0:
-                out.append(f'<g class="head" style="transform:rotate({angle:.4f}deg)"><ellipse rx="6.2" ry="5.8"/><circle cx="3.4" cy="-2.5" r="1.3" fill="{eye}"/><circle cx="3.4" cy="2.5" r="1.3" fill="{eye}"/></g>')
-            else:
-                out.append(f'<circle r="{radii[segment]:.2f}" opacity="{1 - segment * 0.055:.3f}"/>')
-            out.append('</g>')
-        out.append('</g>' if gathering else '</g></g>')
-    out.append('</g></g>')
+    # Original calendar cells never animate; removable overlays consume them.
+    out.append('<g class="consumption" clip-path="url(#grid-clip)">')
+    for step, col, row, count in game['events']:
+        x, y = origin_x + col * PITCH - 6.5, origin_y + row * PITCH - 6.5
+        out.append(f'<rect class="consumed c{col}_{row}" data-step="{step}" data-count="{count}" x="{x}" y="{y}" width="13" height="13" rx="3" fill="{eaten}" visibility="hidden"><set attributeName="visibility" to="visible" begin="{_clock(step)}s" fill="freeze"/></rect>')
+    out.append('</g>')
+    out.append(_snake_svg(game, eye))
+    out.append('</g>')
     out.append(f'<text x="24" y="390" class="muted" font-size="11">{days[0][0].isoformat()} — {days[-1][0].isoformat()}</text>')
     legend_x = width - 174
     out.append(f'<text x="{legend_x - 10}" y="390" text-anchor="end" class="muted" font-size="10">Menos</text>')
@@ -326,8 +458,14 @@ def render_svg(calendar, username, dark=False):
         out.append(f'<rect x="{legend_x + index * 18}" y="380" width="12" height="12" rx="3" fill="{color}"/>')
     out.append(f'<text x="{legend_x + 94}" y="390" class="muted" font-size="10">Mais</text>')
     out.append(f'<rect x="24" y="412" width="{width - 48}" height="4" rx="2" fill="{palette[0]}"/>')
-    out.append(f'<g transform="translate(24 412)"><rect class="progress" width="{width - 48}" height="4" rx="2" fill="{snake}"/></g>')
-    out.append(f'<text x="24" y="436" class="muted" font-size="9">CONTRIBUIÇÕES DO GITHUB · COLETA ÚNICA</text><text x="{width - 24}" y="436" text-anchor="end" class="muted" font-size="9">{motion["collection_duration"]:.0f}s / coleta · {ORBIT_PERIOD:g}s / órbita</text></svg>')
+    out.append(f'<g transform="translate(24 412)"><rect class="progress" width="0" height="4" rx="2" fill="{snake}">')
+    total = sum(day[3] for day in days)
+    consumed = 0
+    for step, col, row, count in game['events']:
+        consumed += count
+        out.append(f'<set attributeName="width" to="{(width - 48) * consumed / total:.6f}" begin="{_clock(step)}s" fill="freeze" data-progress="{consumed / total:.9f}"/>')
+    out.append('</rect></g>')
+    out.append(f'<text x="24" y="436" class="muted" font-size="9">CONTRIBUIÇÕES DO GITHUB · COLETA ÚNICA</text><text x="{width - 24}" y="436" text-anchor="end" class="muted" font-size="9">{collection_duration:.0f}s / coleta · {idle_period:g}s / circuito</text></svg>')
     return '\n'.join(out) + '\n'
 
 

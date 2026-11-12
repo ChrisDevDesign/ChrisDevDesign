@@ -39,7 +39,7 @@
 <p><samp>POR AQUI, ATÉ AS CONTRIBUIÇÕES SE MEXEM.</samp></p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=5" />
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=5" />
-  <img src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=5" alt="Cobrinha coletando contribuições e girando no centro ao terminar" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=6" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=6" />
+  <img src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=6" alt="Snake na grade, crescendo ao coletar contribuições e circulando no centro ao terminar" />
 </picture>
