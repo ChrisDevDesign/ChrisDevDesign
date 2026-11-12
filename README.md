@@ -17,14 +17,14 @@ Projeto produtos digitais para quem a interface costuma deixar de fora — e lev
 
 </div>
 
-## Minha cobrinha de contribuições
+## Contribuições em movimento
 
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg" />
-  <img alt="Cobrinha animada percorrendo o mapa de contribuições e comendo os quadradinhos" src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake-dark.svg?v=2" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=2" />
+  <img width="1000" alt="Mapa anual de contribuições com meses, totais e cobrinha contida no painel" src="https://raw.githubusercontent.com/ChrisDevDesign/ChrisDevDesign/output/github-contribution-grid-snake.svg?v=2" />
 </picture>
 
 </div>

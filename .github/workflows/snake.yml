@@ -8,19 +8,27 @@ on:
     branches:
       - main
 
+concurrency:
+  group: contribution-snake
+  cancel-in-progress: false
+
 jobs:
   generate:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Generate contribution snake SVGs
-        uses: Platane/snk/svg-only@v3
+      - name: Check out profile generator
+        uses: actions/checkout@v6
         with:
-          github_user_name: ChrisDevDesign
-          outputs: |
-            dist/github-contribution-grid-snake.svg?color_snake=%2304724D
-            dist/github-contribution-grid-snake-dark.svg?palette=github-dark&color_snake=%238DB38B
+          persist-credentials: false
+
+      - name: Generate contribution panel
+        run: python3 scripts/generate_snake.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_USERNAME: ${{ github.repository_owner }}
 
       - name: Publish generated SVGs to output branch
         uses: crazy-max/ghaction-github-pages@v3.1.0
